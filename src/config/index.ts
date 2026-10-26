@@ -20,6 +20,7 @@ export interface MarketConfig {
   inspectionFeeDefault: number;
   supportPhone: string;
   supportEmail: string;
+  googleMapsApiKey?: string;
   theme: {
     primary: string;       // #B5F33D (inDrive lime-green)
     text: string;          // #151515
@@ -43,6 +44,7 @@ export const APP_CONFIG: MarketConfig = {
     minorUnit: 1,
   },
   timezone: "Asia/Karachi",
+  googleMapsApiKey: (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_GOOGLE_MAPS_API_KEY) || '',
   serviceAreas: [
     "F-6 Islamabad",
     "F-7 Islamabad",

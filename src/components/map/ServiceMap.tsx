@@ -1,9 +1,15 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Map, Marker, NavigationControl, Popup } from 'maplibre-gl';
-import 'maplibre-gl/dist/maplibre-gl.css';
+import { setOptions, importLibrary } from '@googlemaps/js-api-loader';
 import { useApp } from '../../context/AppContext';
 import { ProviderProfile } from '../../types';
-import { Navigation2, Layers, Compass } from 'lucide-react';
+import { APP_CONFIG } from '../../config';
+import {
+  Navigation2,
+  Key,
+  Layers,
+  MapPin,
+  ExternalLink
+} from 'lucide-react';
 
 interface ServiceMapProps {
   providers: ProviderProfile[];
@@ -11,196 +17,207 @@ interface ServiceMapProps {
   height?: string;
 }
 
-// OpenFreeMap vector tile style endpoints
-const OPENFREEMAP_STYLES = {
-  positron: 'https://tiles.openfreemap.org/styles/positron', // Clean, minimalist inDrive aesthetic
-  liberty: 'https://tiles.openfreemap.org/styles/liberty',   // Full street detail & landmarks
-  bright: 'https://tiles.openfreemap.org/styles/bright',     // High-contrast
-};
-
 export const ServiceMap: React.FC<ServiceMapProps> = ({
   providers,
   onSelectProvider,
   height = "100%"
 }) => {
   const mapContainerRef = useRef<HTMLDivElement>(null);
-  const mapInstanceRef = useRef<Map | null>(null);
-  const markersRef = useRef<Marker[]>([]);
+  const mapInstanceRef = useRef<google.maps.Map | null>(null);
+  const markersRef = useRef<google.maps.Marker[]>([]);
+  const infoWindowRef = useRef<google.maps.InfoWindow | null>(null);
+
   const { userLocation } = useApp();
 
-  const [currentStyle, setCurrentStyle] = useState<keyof typeof OPENFREEMAP_STYLES>('positron');
-  const [styleMenuOpen, setStyleMenuOpen] = useState(false);
-  const [mapLoaded, setMapLoaded] = useState(false);
+  // API Key management: check localStorage or config
+  const [apiKey, setApiKey] = useState<string>(() => {
+    return (
+      localStorage.getItem('servicebid_google_maps_key') ||
+      APP_CONFIG.googleMapsApiKey ||
+      ''
+    );
+  });
+  const [keyModalOpen, setKeyModalOpen] = useState<boolean>(false);
+  const [tempKey, setTempKey] = useState<string>(apiKey);
+  const [mapType, setMapType] = useState<string>('roadmap');
+  const [mapLoaded, setMapLoaded] = useState<boolean>(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
-  // Initialize MapLibre GL map with OpenFreeMap vector tiles
+  // Initialize Google Maps using the modern Google Maps JS API loader
   useEffect(() => {
     if (!mapContainerRef.current) return;
 
-    // Center coordinates for MapLibre: [longitude, latitude]
-    const map = new Map({
-      container: mapContainerRef.current,
-      style: OPENFREEMAP_STYLES[currentStyle],
-      center: [userLocation.lng, userLocation.lat],
-      zoom: 13,
-      pitch: 30, // Subtle 3D angle for modern feel
-      attributionControl: false
-    });
+    let isMounted = true;
+    setLoadError(null);
 
-    // Add navigation controls (zoom, pitch, rotation)
-    map.addControl(new NavigationControl({ showCompass: true, showZoom: true }), 'top-right');
-
-    map.on('load', () => {
-      setMapLoaded(true);
-
-      // Add Coverage Radius GeoJSON polygon around user location
+    const initGoogleMap = async () => {
       try {
-        const radiusInKm = 3.5;
-        const points = 64;
-        const coords: [number, number][] = [];
-        const distanceX = radiusInKm / (111.32 * Math.cos((userLocation.lat * Math.PI) / 180));
-        const distanceY = radiusInKm / 110.574;
+        setOptions({
+          key: apiKey.trim(),
+          v: 'weekly',
+        });
 
-        for (let i = 0; i < points; i++) {
-          const theta = (i / points) * (2 * Math.PI);
-          const x = distanceX * Math.cos(theta);
-          const y = distanceY * Math.sin(theta);
-          coords.push([userLocation.lng + x, userLocation.lat + y]);
-        }
-        coords.push(coords[0]);
+        const mapsLib = (await importLibrary('maps')) as google.maps.MapsLibrary;
+        const markerLib = (await importLibrary('marker')) as google.maps.MarkerLibrary;
+        if (!isMounted || !mapContainerRef.current) return;
 
-        map.addSource('coverage-area', {
-          type: 'geojson',
-          data: {
-            type: 'Feature',
-            geometry: {
-              type: 'Polygon',
-              coordinates: [coords]
-            },
-            properties: {}
+        // Custom minimalist inDrive map style
+        const inDriveStyle: google.maps.MapTypeStyle[] = [
+          {
+            featureType: 'poi',
+            elementType: 'labels',
+            stylers: [{ visibility: 'off' }]
+          },
+          {
+            featureType: 'transit',
+            elementType: 'labels',
+            stylers: [{ visibility: 'off' }]
+          },
+          {
+            featureType: 'road',
+            elementType: 'geometry',
+            stylers: [{ lightness: 20 }]
+          }
+        ];
+
+        const map = new mapsLib.Map(mapContainerRef.current, {
+          center: { lat: userLocation.lat, lng: userLocation.lng },
+          zoom: 13,
+          mapTypeId: mapType as any,
+          mapTypeControl: false,
+          streetViewControl: false,
+          fullscreenControl: false,
+          zoomControl: true,
+          styles: mapType === 'roadmap' ? inDriveStyle : undefined
+        });
+
+        infoWindowRef.current = new mapsLib.InfoWindow();
+
+        // 1. User Location Marker
+        new markerLib.Marker({
+          position: { lat: userLocation.lat, lng: userLocation.lng },
+          map,
+          title: `Your Location: ${userLocation.area}`,
+          icon: {
+            path: google.maps.SymbolPath.CIRCLE,
+            fillColor: '#B5F33D',
+            fillOpacity: 1,
+            strokeColor: '#151515',
+            strokeWeight: 2.5,
+            scale: 9
           }
         });
 
-        map.addLayer({
-          id: 'coverage-area-fill',
-          type: 'fill',
-          source: 'coverage-area',
-          paint: {
-            'fill-color': '#B5F33D',
-            'fill-opacity': 0.12
-          }
+        // 2. Coverage Circle (inDrive subtle green)
+        new mapsLib.Circle({
+          map,
+          center: { lat: userLocation.lat, lng: userLocation.lng },
+          radius: 3500,
+          fillColor: '#B5F33D',
+          fillOpacity: 0.12,
+          strokeColor: '#65A30D',
+          strokeWeight: 1.5
         });
 
-        map.addLayer({
-          id: 'coverage-area-line',
-          type: 'line',
-          source: 'coverage-area',
-          paint: {
-            'line-color': '#65A30D',
-            'line-width': 1.5,
-            'line-dasharray': [2, 2]
-          }
-        });
-      } catch (e) {
-        console.warn('GeoJSON circle layer warning:', e);
+        mapInstanceRef.current = map;
+        setMapLoaded(true);
+      } catch (err: any) {
+        console.warn('Google Maps JS API load notice:', err);
+        setLoadError(err?.message || 'Google Maps failed to load');
       }
-    });
+    };
 
-    mapInstanceRef.current = map;
+    initGoogleMap();
 
     return () => {
-      map.remove();
-      mapInstanceRef.current = null;
+      isMounted = false;
     };
-  }, [currentStyle]);
+  }, [apiKey, mapType]);
 
-  // Update markers when providers or userLocation change
+  // Update provider markers when providers or map change
   useEffect(() => {
     const map = mapInstanceRef.current;
-    if (!map) return;
+    if (!map || !mapLoaded) return;
 
     // Clear old markers
-    markersRef.current.forEach(m => m.remove());
+    markersRef.current.forEach(m => m.setMap(null));
     markersRef.current = [];
 
-    // 1. User Location Marker
-    const userEl = document.createElement('div');
-    userEl.className = 'custom-user-marker';
-    userEl.innerHTML = `
-      <div style="position:relative;display:flex;align-items:center;justify-content:center;width:36px;height:36px;cursor:pointer;">
-        <div style="position:absolute;width:36px;height:36px;border-radius:50%;background:#B5F33D;opacity:0.4;animation:ping 2s cubic-bezier(0, 0, 0.2, 1) infinite;"></div>
-        <div style="width:22px;height:22px;border-radius:50%;background:#0F172A;border:2.5px solid #B5F33D;display:flex;align-items:center;justify-content:center;color:white;font-size:11px;font-weight:900;box-shadow:0 4px 10px rgba(0,0,0,0.3);">
-          📍
-        </div>
-      </div>
-    `;
-
-    const userMarker = new Marker({ element: userEl })
-      .setLngLat([userLocation.lng, userLocation.lat])
-      .setPopup(
-        new Popup({ offset: 15, closeButton: false }).setHTML(`
-          <div style="font-family:sans-serif;font-size:11px;font-weight:700;padding:2px 4px;color:#0f172a;">
-            Your Location: ${userLocation.area}
-          </div>
-        `)
-      )
-      .addTo(map);
-
-    markersRef.current.push(userMarker);
-
-    // 2. Providers Markers
+    // Add Provider Markers
     providers.forEach(prov => {
       const isOnline = prov.isOnline;
-      const el = document.createElement('div');
-      el.className = 'custom-provider-marker';
-      el.style.cursor = 'pointer';
-      el.innerHTML = `
-        <div style="display:flex;flex-direction:column;align-items:center;transition:transform 0.2s ease;">
-          <div style="background:#ffffff;border:1.5px solid ${isOnline ? '#65A30D' : '#94A3B8'};border-radius:9999px;padding:3px 9px;box-shadow:0 4px 12px rgba(15,23,42,0.15);display:flex;align-items:center;gap:5px;white-space:nowrap;font-size:11px;font-weight:900;color:#0F172A;">
-            <span style="width:6px;height:6px;border-radius:50%;background:${isOnline ? '#22C55E' : '#94A3B8'};display:inline-block;"></span>
-            <span>₨ ${prov.startingPrice}</span>
-          </div>
-          <div style="width:8px;height:8px;background:#ffffff;border-right:1.5px solid ${isOnline ? '#65A30D' : '#94A3B8'};border-bottom:1.5px solid ${isOnline ? '#65A30D' : '#94A3B8'};transform:rotate(45deg);margin-top:-4px;"></div>
-        </div>
-      `;
 
-      el.addEventListener('click', (e) => {
-        e.stopPropagation();
-        if (onSelectProvider) onSelectProvider(prov);
+      const marker = new google.maps.Marker({
+        position: { lat: prov.location.lat, lng: prov.location.lng },
+        map,
+        title: `${prov.name} - ₨ ${prov.startingPrice}`,
+        label: {
+          text: `₨ ${prov.startingPrice}`,
+          color: '#151515',
+          fontSize: '11px',
+          fontWeight: 'bold',
+          className: 'google-maps-price-label'
+        },
+        icon: {
+          path: 'M 0,0 C -15,-20 -20,-30 0,-40 C 20,-30 15,-20 0,0 Z',
+          fillColor: '#FFFFFF',
+          fillOpacity: 1,
+          strokeColor: isOnline ? '#65A30D' : '#9CA3AF',
+          strokeWeight: 2,
+          scale: 1,
+          labelOrigin: new google.maps.Point(0, -25)
+        }
       });
 
-      const popup = new Popup({ offset: 20, closeButton: false }).setHTML(`
-        <div style="font-family:sans-serif;font-size:11px;padding:4px;color:#0f172a;">
-          <div style="font-weight:800;font-size:12px;">${prov.name}</div>
-          <div style="color:#059669;font-weight:700;">${prov.specialty}</div>
-          <div style="color:#64748b;margin-top:2px;">★ ${prov.rating} (${prov.reviewCount} reviews) • ${prov.location.area}</div>
-        </div>
-      `);
+      marker.addListener('click', () => {
+        if (infoWindowRef.current) {
+          const content = `
+            <div style="font-family:Plus Jakarta Sans, sans-serif;padding:6px;max-width:200px;">
+              <div style="font-weight:800;font-size:13px;color:#0F172A;">${prov.name}</div>
+              <div style="color:#059669;font-weight:700;font-size:11px;margin-top:2px;">${prov.specialty}</div>
+              <div style="font-size:11px;color:#64748B;margin-top:4px;">
+                ★ <b>${prov.rating}</b> (${prov.reviewCount} reviews) • ${prov.location.area}
+              </div>
+              <div style="font-size:12px;font-weight:800;color:#0F172A;margin-top:4px;">
+                Starting from ₨ ${prov.startingPrice}
+              </div>
+            </div>
+          `;
+          infoWindowRef.current.setContent(content);
+          infoWindowRef.current.open(map, marker);
+        }
 
-      const marker = new Marker({ element: el })
-        .setLngLat([prov.location.lng, prov.location.lat])
-        .setPopup(popup)
-        .addTo(map);
+        if (onSelectProvider) {
+          onSelectProvider(prov);
+        }
+      });
 
       markersRef.current.push(marker);
     });
 
-  }, [providers, userLocation, onSelectProvider, mapLoaded]);
+  }, [providers, mapLoaded, onSelectProvider]);
 
   // Recenter helper
   const handleRecenter = () => {
-    mapInstanceRef.current?.flyTo({
-      center: [userLocation.lng, userLocation.lat],
-      zoom: 13,
-      essential: true
-    });
+    if (mapInstanceRef.current) {
+      mapInstanceRef.current.panTo({ lat: userLocation.lat, lng: userLocation.lng });
+      mapInstanceRef.current.setZoom(13);
+    }
+  };
+
+  const handleSaveApiKey = () => {
+    localStorage.setItem('servicebid_google_maps_key', tempKey.trim());
+    setApiKey(tempKey.trim());
+    setKeyModalOpen(false);
   };
 
   return (
     <div className="relative w-full h-full min-h-[480px] bg-slate-100 rounded-3xl overflow-hidden border border-slate-200/90 shadow-sm" style={{ height }}>
-      {/* MapLibre DOM Container */}
+      
+      {/* Google Maps DOM element */}
       <div ref={mapContainerRef} className="w-full h-full z-0" />
 
-      {/* Floating Controls in Top Left */}
+      {/* Floating Top Controls */}
       <div className="absolute top-4 left-4 z-10 flex items-center gap-2">
         
         {/* Recenter button */}
@@ -213,55 +230,94 @@ export const ServiceMap: React.FC<ServiceMapProps> = ({
           <span>Recenter</span>
         </button>
 
-        {/* OpenFreeMap Style Switcher */}
-        <div className="relative">
-          <button
-            onClick={() => setStyleMenuOpen(!styleMenuOpen)}
-            className="bg-white/95 backdrop-blur-md hover:bg-white text-slate-800 px-3 py-2 rounded-2xl shadow-md border border-slate-200 flex items-center gap-1.5 text-xs font-bold active:scale-95 transition-all"
-            title="Switch OpenFreeMap style"
-          >
-            <Layers size={13} className="text-slate-600" />
-            <span className="capitalize">{currentStyle}</span>
-          </button>
-
-          {styleMenuOpen && (
-            <div className="absolute left-0 mt-2 w-36 bg-white rounded-2xl shadow-xl border border-slate-200 py-1.5 z-20 animate-in fade-in slide-in-from-top-2">
-              <div className="px-3 py-1 text-[9px] font-bold text-slate-400 uppercase tracking-wider">
-                OpenFreeMap Style
-              </div>
-              {(['positron', 'liberty', 'bright'] as const).map(style => (
-                <button
-                  key={style}
-                  onClick={() => {
-                    setCurrentStyle(style);
-                    setStyleMenuOpen(false);
-                  }}
-                  className={`w-full text-left px-3 py-1.5 text-xs font-semibold hover:bg-slate-50 capitalize flex items-center justify-between ${
-                    currentStyle === style ? 'text-lime-700 font-bold bg-lime-50' : 'text-slate-700'
-                  }`}
-                >
-                  <span>{style}</span>
-                  {currentStyle === style && <span className="w-1.5 h-1.5 rounded-full bg-lime-600"></span>}
-                </button>
-              ))}
-            </div>
-          )}
+        {/* Map Type Selector: Roadmap / Satellite / Terrain */}
+        <div className="bg-white/95 backdrop-blur-md rounded-2xl shadow-md border border-slate-200 p-0.5 flex items-center text-xs font-bold">
+          {(['roadmap', 'satellite', 'terrain'] as const).map(type => (
+            <button
+              key={type}
+              onClick={() => setMapType(type)}
+              className={`px-2.5 py-1.5 rounded-xl capitalize transition-all ${
+                mapType === type
+                  ? 'bg-slate-900 text-white shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              {type}
+            </button>
+          ))}
         </div>
 
+        {/* Google Maps API Key Config button */}
+        <button
+          onClick={() => setKeyModalOpen(true)}
+          className={`px-3 py-2 rounded-2xl shadow-md border flex items-center gap-1.5 text-xs font-bold transition-all ${
+            apiKey
+              ? 'bg-emerald-50 border-emerald-200 text-emerald-800 hover:bg-emerald-100'
+              : 'bg-white/95 backdrop-blur-md border-slate-200 text-slate-700 hover:bg-white'
+          }`}
+          title="Configure Google Maps API Key"
+        >
+          <Key size={13} className={apiKey ? 'text-emerald-600' : 'text-slate-400'} />
+          <span>{apiKey ? 'Google Key Set' : 'Google Key'}</span>
+        </button>
+
       </div>
 
-      {/* Attribution & Status Badge in Bottom */}
-      <div className="absolute bottom-3 left-4 z-10 bg-white/95 backdrop-blur-md px-3 py-1.5 rounded-2xl shadow-xs border border-slate-200 text-[11px] font-semibold text-slate-700 flex items-center gap-2 pointer-events-none">
+      {/* Status Pill in Bottom Left */}
+      <div className="absolute bottom-3 left-4 z-10 bg-white/95 backdrop-blur-md px-3.5 py-1.5 rounded-2xl shadow-xs border border-slate-200 text-[11px] font-semibold text-slate-700 flex items-center gap-2 pointer-events-none">
         <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-        <span>{providers.filter(p => p.isOnline).length} Verified Pros in {userLocation.area}</span>
+        <span>{providers.filter(p => p.isOnline).length} Verified Specialists in {userLocation.area}</span>
         <span className="text-slate-300">•</span>
-        <span className="text-[10px] text-slate-500">Map: <b>OpenFreeMap</b></span>
+        <span className="text-[10px] text-slate-600 font-bold">Google Maps</span>
       </div>
 
-      {/* Official OpenFreeMap & OSM Legal Attribution in Bottom Right */}
-      <div className="absolute bottom-2 right-2 z-10 text-[9px] text-slate-500 bg-white/80 backdrop-blur-xs px-2 py-0.5 rounded-md">
-        <a href="https://openfreemap.org" target="_blank" rel="noreferrer" className="hover:underline">OpenFreeMap</a> © <a href="https://www.openmaptiles.org/" target="_blank" rel="noreferrer" className="hover:underline">OpenMapTiles</a> Data: <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer" className="hover:underline">OSM</a>
-      </div>
+      {/* Google Maps API Key Modal */}
+      {keyModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 animate-in fade-in zoom-in-95">
+            <div className="flex items-center gap-2 pb-2">
+              <span className="text-xl">🗺️</span>
+              <h3 className="font-black text-base text-slate-900">Google Maps JavaScript API Key</h3>
+            </div>
+            
+            <p className="text-xs text-slate-600 mt-1">
+              Enter your Google Maps API Key to enable official Google satellite, street view, and full location services.
+            </p>
+
+            <div className="mt-4">
+              <label className="text-[11px] font-bold text-slate-700 uppercase block mb-1">
+                API Key
+              </label>
+              <input
+                type="text"
+                value={tempKey}
+                onChange={(e) => setTempKey(e.target.value)}
+                placeholder="AIzaSy..."
+                className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-xs font-mono font-bold focus:outline-none focus:ring-2 focus:ring-[#B5F33D]"
+              />
+              <span className="text-[10px] text-slate-400 mt-1 block">
+                Saved securely in browser local storage and loaded via <code>@googlemaps/js-api-loader</code>.
+              </span>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 mt-5">
+              <button
+                onClick={() => setKeyModalOpen(false)}
+                className="px-4 py-2 rounded-xl border border-slate-300 text-xs font-bold text-slate-700 hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveApiKey}
+                className="bg-[#B5F33D] hover:bg-[#a6e632] text-slate-950 text-xs font-black px-5 py-2 rounded-xl shadow active:scale-95 transition-all"
+              >
+                Apply Google Maps Key
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 };
