@@ -36,9 +36,6 @@ export function AppContent() {
   return (
     <div className="min-h-screen flex flex-col bg-[#F6F7F8] text-[#151515] pb-20 sm:pb-8">
       
-      {/* Dev Switcher Bar */}
-      <DevPreviewBar />
-
       {/* Main Header */}
       <Header />
 

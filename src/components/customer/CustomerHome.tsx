@@ -3,6 +3,8 @@ import { useApp } from '../../context/AppContext';
 import { CATEGORIES_SEED, APP_CONFIG } from '../../config';
 import { ServiceMap } from '../map/ServiceMap';
 import { ProviderProfile } from '../../types';
+import { CustomerRequestsView } from './CustomerRequestsView';
+import { CustomerJobTracker } from './CustomerJobTracker';
 import {
   Search,
   MapPin,
@@ -23,9 +25,10 @@ import {
   Droplets,
   Camera,
   Flower2,
-  PhoneCall,
+  ChevronRight,
+  TrendingDown,
   Clock,
-  ChevronRight
+  Briefcase
 } from 'lucide-react';
 
 export const CustomerHome: React.FC = () => {
@@ -41,241 +44,132 @@ export const CustomerHome: React.FC = () => {
     setViewMode,
     setSelectedProviderForProfile,
     setIsPostRequestOpen,
+    offers,
+    bookings,
     t
   } = useApp();
 
+  const [activeMainTab, setActiveMainTab] = useState<'providers' | 'bids' | 'active_job'>('providers');
   const [minRating, setMinRating] = useState<number>(0);
   const [verifiedOnly, setVerifiedOnly] = useState<boolean>(false);
-  const [availableNowOnly, setAvailableNowOnly] = useState<boolean>(false);
-  const [filterMenuOpen, setFilterMenuOpen] = useState(false);
+  const [availableOnly, setAvailableOnly] = useState<boolean>(false);
 
   // Category Icon helper
   const getCategoryIcon = (iconName: string) => {
     switch (iconName) {
-      case 'Wrench': return <Wrench size={16} />;
-      case 'Zap': return <Zap size={16} />;
-      case 'Snowflake': return <Snowflake size={16} />;
-      case 'Refrigerator': return <Refrigerator size={16} />;
-      case 'Sparkles': return <Sparkles size={16} />;
-      case 'Hammer': return <Hammer size={16} />;
-      case 'Paintbrush': return <Paintbrush size={16} />;
-      case 'ShieldAlert': return <ShieldAlert size={16} />;
-      case 'Droplets': return <Droplets size={16} />;
-      case 'Camera': return <Camera size={16} />;
-      case 'Flower2': return <Flower2 size={16} />;
-      default: return <Wrench size={16} />;
+      case 'Wrench': return <Wrench size={15} />;
+      case 'Zap': return <Zap size={15} />;
+      case 'Snowflake': return <Snowflake size={15} />;
+      case 'Refrigerator': return <Refrigerator size={15} />;
+      case 'Sparkles': return <Sparkles size={15} />;
+      case 'Hammer': return <Hammer size={15} />;
+      case 'Paintbrush': return <Paintbrush size={15} />;
+      case 'ShieldAlert': return <ShieldAlert size={15} />;
+      case 'Droplets': return <Droplets size={15} />;
+      case 'Camera': return <Camera size={15} />;
+      case 'Flower2': return <Flower2 size={15} />;
+      default: return <Wrench size={15} />;
     }
   };
 
-  // Filter providers
   const filteredProviders = providers.filter(p => {
-    // Category match
-    if (selectedCategory && !p.categoryIds.includes(selectedCategory)) {
-      return false;
-    }
-    // Search query match
+    if (selectedCategory && !p.categoryIds.includes(selectedCategory)) return false;
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
-      const matchName = p.name.toLowerCase().includes(q);
-      const matchSpecialty = p.specialty.toLowerCase().includes(q);
-      const matchBio = p.bio.toLowerCase().includes(q);
-      const matchSub = p.subcategories.some(s => s.toLowerCase().includes(q));
-      if (!matchName && !matchSpecialty && !matchBio && !matchSub) return false;
+      const match = p.name.toLowerCase().includes(q) ||
+                    p.specialty.toLowerCase().includes(q) ||
+                    p.subcategories.some(s => s.toLowerCase().includes(q));
+      if (!match) return false;
     }
-    // Min rating
     if (minRating > 0 && p.rating < minRating) return false;
-    // Verified only
     if (verifiedOnly && !p.isVerified) return false;
-    // Available now (isOnline)
-    if (availableNowOnly && !p.isOnline) return false;
-
+    if (availableOnly && !p.isOnline) return false;
     return true;
   });
 
-  const handleUseMyLocation = () => {
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          setUserLocation({
-            area: "Current GPS Location",
-            lat: pos.coords.latitude,
-            lng: pos.coords.longitude
-          });
-        },
-        () => {
-          alert("Location access denied or unavailable. You can choose your sector manually above.");
-        }
-      );
-    }
-  };
+  const pendingOffersCount = offers.filter(o => o.status === 'pending' || o.status === 'countered').length;
+  const activeJobsCount = bookings.filter(b => ['confirmed', 'on_the_way', 'arrived', 'in_progress'].includes(b.status)).length;
 
   return (
-    <div className="flex-1 flex flex-col max-w-7xl mx-auto w-full px-4 sm:px-6 py-4">
+    <div className="flex-1 flex flex-col max-w-7xl mx-auto w-full px-4 sm:px-6 py-5 space-y-5">
       
-      {/* Top Banner / Hero for Customer */}
-      <div className="bg-white rounded-2xl p-4 sm:p-5 border border-gray-200 shadow-sm mb-4">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded-full bg-lime-100 text-lime-950 font-bold text-xs mb-2">
-              <span className="w-2 h-2 rounded-full bg-[#151515]"></span>
+      {/* Sleek Hero Banner: inDrive Value Proposition */}
+      <div className="bg-white rounded-3xl p-5 sm:p-6 border border-slate-200/80 shadow-xs">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-5">
+          <div className="space-y-1.5">
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-lime-100 text-lime-950 font-bold text-xs">
+              <span className="w-2 h-2 rounded-full bg-slate-950"></span>
               <span>{t('tagline')}</span>
             </div>
-            <h1 className="text-xl sm:text-2xl font-black text-[#151515] tracking-tight">
-              Hire Nearby Verified Pros on Your Budget
+            <h1 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight">
+              Hire Nearby Verified Specialists on Your Budget
             </h1>
-            <p className="text-xs sm:text-sm text-gray-600 mt-1">
-              Select a category or post your job to let plumbers, electricians, and AC specialists bid.
+            <p className="text-xs sm:text-sm text-slate-500 font-medium max-w-xl">
+              Post your job in Islamabad & Rawalpindi. Top rated plumbers, electricians, and AC technicians will compete with offers.
             </p>
           </div>
 
-          {/* Prominent inDrive Action Buttons */}
           <div className="flex items-center gap-3 self-stretch sm:self-auto">
             <button
               onClick={() => setIsPostRequestOpen(true)}
-              className="flex-1 sm:flex-none bg-[#B5F33D] hover:bg-[#a5e62c] text-[#151515] font-extrabold text-sm px-5 py-3 rounded-xl shadow-md border border-black/10 flex items-center justify-center gap-2 transition-all active:scale-95"
+              className="w-full sm:w-auto bg-[#B5F33D] hover:bg-[#a6e632] text-slate-950 font-black text-sm px-6 py-3.5 rounded-2xl shadow-sm border border-black/10 flex items-center justify-center gap-2 transition-all active:scale-95"
             >
               <PlusCircle size={18} />
-              <span>{t('postRequest')} & Offer Price</span>
+              <span>Post Request & Offer Price</span>
             </button>
           </div>
         </div>
 
-        {/* Search Bar & Location Pin */}
-        <div className="mt-4 pt-4 border-t border-gray-100 flex flex-col sm:flex-row items-center gap-3">
-          
-          {/* Service Search Input */}
+        {/* Search & Location Bar */}
+        <div className="mt-5 pt-4 border-t border-slate-100 flex flex-col sm:flex-row items-center gap-3">
           <div className="relative flex-1 w-full">
-            <Search size={18} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" />
+            <Search size={18} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
             <input
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder={t('searchPlaceholder')}
-              className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-gray-200 bg-gray-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#B5F33D] focus:border-transparent text-sm font-medium"
+              placeholder="Search service, issue, or specialist (e.g. leaking tap, AC service, Tariq)..."
+              className="w-full pl-10 pr-4 py-2.5 rounded-2xl border border-slate-200 bg-slate-50 focus:bg-white text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-[#B5F33D]"
             />
-            {searchQuery && (
-              <button
-                onClick={() => setSearchQuery('')}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-semibold text-gray-400 hover:text-gray-600"
-              >
-                Clear
-              </button>
-            )}
           </div>
 
-          {/* Use My Location GPS button */}
           <button
-            onClick={handleUseMyLocation}
-            className="w-full sm:w-auto px-3.5 py-2.5 rounded-xl border border-gray-200 hover:bg-gray-50 flex items-center justify-center gap-1.5 text-xs font-semibold text-gray-700 whitespace-nowrap active:scale-95"
+            onClick={() => {
+              if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(
+                  (pos) => setUserLocation({ area: "GPS Location", lat: pos.coords.latitude, lng: pos.coords.longitude }),
+                  () => alert("Location permission denied. Please choose your sector above.")
+                );
+              }
+            }}
+            className="w-full sm:w-auto px-4 py-2.5 rounded-2xl border border-slate-200 hover:bg-slate-50 flex items-center justify-center gap-1.5 text-xs font-bold text-slate-700 active:scale-95"
           >
-            <MapPin size={15} className="text-emerald-600" />
-            <span>Use My Location</span>
+            <MapPin size={15} className="text-lime-600" />
+            <span>Use My GPS</span>
           </button>
-
-          {/* Filter dropdown toggle */}
-          <button
-            onClick={() => setFilterMenuOpen(!filterMenuOpen)}
-            className={`w-full sm:w-auto px-3.5 py-2.5 rounded-xl border flex items-center justify-center gap-1.5 text-xs font-semibold whitespace-nowrap transition-colors ${
-              minRating > 0 || verifiedOnly || availableNowOnly
-                ? 'bg-black text-white border-black'
-                : 'border-gray-200 text-gray-700 hover:bg-gray-50'
-            }`}
-          >
-            <SlidersHorizontal size={15} />
-            <span>Filters {(minRating > 0 || verifiedOnly || availableNowOnly) && '•'}</span>
-          </button>
-
-          {/* Mobile List / Map toggle */}
-          <div className="flex sm:hidden w-full bg-gray-100 p-1 rounded-xl">
-            <button
-              onClick={() => setViewMode('list')}
-              className={`flex-1 py-1.5 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 transition-all ${
-                viewMode === 'list' ? 'bg-white shadow text-black' : 'text-gray-500'
-              }`}
-            >
-              <ListIcon size={14} />
-              <span>List</span>
-            </button>
-            <button
-              onClick={() => setViewMode('map')}
-              className={`flex-1 py-1.5 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 transition-all ${
-                viewMode === 'map' ? 'bg-white shadow text-black' : 'text-gray-500'
-              }`}
-            >
-              <MapIcon size={14} />
-              <span>Map View</span>
-            </button>
-          </div>
         </div>
 
-        {/* Filter Expandable Panel */}
-        {filterMenuOpen && (
-          <div className="mt-3 p-3 bg-gray-50 rounded-xl border border-gray-200 flex flex-wrap items-center gap-4 text-xs">
-            <div className="flex items-center gap-2">
-              <span className="font-bold text-gray-700">Min Rating:</span>
-              {[0, 4.5, 4.8].map(r => (
-                <button
-                  key={r}
-                  onClick={() => setMinRating(r)}
-                  className={`px-2 py-1 rounded-lg font-medium border ${
-                    minRating === r ? 'bg-black text-white border-black' : 'bg-white text-gray-700 border-gray-200'
-                  }`}
-                >
-                  {r === 0 ? 'Any' : `${r}★+`}
-                </button>
-              ))}
-            </div>
-
-            <label className="flex items-center gap-1.5 cursor-pointer font-medium text-gray-700">
-              <input
-                type="checkbox"
-                checked={verifiedOnly}
-                onChange={(e) => setVerifiedOnly(e.target.checked)}
-                className="rounded accent-emerald-500"
-              />
-              <span>Verified CNIC / License only</span>
-            </label>
-
-            <label className="flex items-center gap-1.5 cursor-pointer font-medium text-gray-700">
-              <input
-                type="checkbox"
-                checked={availableNowOnly}
-                onChange={(e) => setAvailableNowOnly(e.target.checked)}
-                className="rounded accent-emerald-500"
-              />
-              <span>Available Now (Online)</span>
-            </label>
-
-            <button
-              onClick={() => { setMinRating(0); setVerifiedOnly(false); setAvailableNowOnly(false); }}
-              className="ml-auto text-xs text-gray-500 hover:text-black underline"
-            >
-              Reset Filters
-            </button>
-          </div>
-        )}
-
-        {/* Category Chips Carousel */}
-        <div className="mt-4 pt-4 border-t border-gray-100 flex items-center gap-2 overflow-x-auto no-scrollbar pb-1">
+        {/* Clean Service Categories Carousel */}
+        <div className="mt-4 pt-4 border-t border-slate-100 flex items-center gap-2 overflow-x-auto no-scrollbar pb-1">
           <button
             onClick={() => setSelectedCategory(null)}
-            className={`flex-shrink-0 px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
+            className={`flex-shrink-0 px-4 py-2 rounded-2xl text-xs font-bold transition-all ${
               selectedCategory === null
-                ? 'bg-[#151515] text-[#B5F33D] shadow-sm'
-                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                ? 'bg-slate-950 text-[#B5F33D] shadow-sm'
+                : 'bg-slate-100 text-slate-700 hover:bg-slate-200/70'
             }`}
           >
-            <span>All Services</span>
+            All Services
           </button>
 
           {CATEGORIES_SEED.map(cat => (
             <button
               key={cat.id}
               onClick={() => setSelectedCategory(cat.id === selectedCategory ? null : cat.id)}
-              className={`flex-shrink-0 px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
+              className={`flex-shrink-0 px-3.5 py-2 rounded-2xl text-xs font-bold transition-all flex items-center gap-1.5 ${
                 selectedCategory === cat.id
-                  ? 'bg-[#151515] text-[#B5F33D] shadow-sm'
-                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  ? 'bg-slate-950 text-[#B5F33D] shadow-sm'
+                  : 'bg-slate-100 text-slate-700 hover:bg-slate-200/70'
               }`}
             >
               {getCategoryIcon(cat.icon)}
@@ -285,143 +179,200 @@ export const CustomerHome: React.FC = () => {
         </div>
       </div>
 
-      {/* Main Split Layout: Desktop 420px Sidebar + Full Interactive Map */}
-      <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-6 min-h-[550px]">
-        
-        {/* Left Side: Provider List (Hidden on mobile if map view is active) */}
-        <div className={`lg:col-span-5 flex flex-col gap-3 ${viewMode === 'map' ? 'hidden lg:flex' : 'flex'}`}>
-          <div className="flex items-center justify-between px-1">
-            <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">
-              {filteredProviders.length} Nearby Specialists in {userLocation.area}
+      {/* Main View Mode Tabs (Specialists vs My Job Bids vs Active Job Tracker) */}
+      <div className="flex items-center justify-between border-b border-slate-200 pb-1">
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setActiveMainTab('providers')}
+            className={`px-4 py-2 rounded-2xl text-xs font-extrabold transition-all flex items-center gap-1.5 ${
+              activeMainTab === 'providers'
+                ? 'bg-slate-950 text-white shadow-sm'
+                : 'text-slate-600 hover:bg-slate-100'
+            }`}
+          >
+            <span>Available Specialists</span>
+            <span className="text-[10px] bg-slate-800 text-[#B5F33D] px-1.5 py-0.2 rounded-full">
+              {filteredProviders.length}
             </span>
-            <span className="text-[11px] text-gray-400">Prices are estimates</span>
-          </div>
+          </button>
 
-          <div className="space-y-3 overflow-y-auto max-h-[700px] pr-1">
-            {filteredProviders.length === 0 ? (
-              <div className="bg-white rounded-2xl p-8 border border-gray-200 text-center">
-                <Wrench className="mx-auto text-gray-300 mb-2" size={36} />
-                <h3 className="font-bold text-gray-800 text-sm">No specialists match your filters</h3>
-                <p className="text-xs text-gray-500 mt-1">Try clearing filters or search query.</p>
-              </div>
-            ) : (
-              filteredProviders.map(provider => (
-                <div
-                  key={provider.id}
-                  onClick={() => setSelectedProviderForProfile(provider)}
-                  className="bg-white hover:border-gray-300 border border-gray-200 rounded-2xl p-4 shadow-sm hover:shadow transition-all cursor-pointer group flex flex-col gap-3"
-                >
-                  <div className="flex items-start gap-3">
-                    {/* Provider Avatar */}
-                    <div className="relative flex-shrink-0">
-                      <img
-                        src={provider.avatar}
-                        alt={provider.name}
-                        className="w-14 h-14 rounded-2xl object-cover border border-gray-200"
-                      />
-                      {provider.isOnline && (
-                        <span className="absolute -bottom-1 -right-1 w-3.5 h-3.5 bg-emerald-500 border-2 border-white rounded-full" title="Online now" />
-                      )}
-                    </div>
-
-                    {/* Details */}
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center justify-between gap-1">
-                        <h3 className="font-extrabold text-sm text-[#151515] truncate group-hover:text-emerald-700 transition-colors">
-                          {provider.name}
-                        </h3>
-                        {provider.isVerified && (
-                          <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200 flex-shrink-0">
-                            <CheckCircle size={11} />
-                            Verified
-                          </span>
-                        )}
-                      </div>
-
-                      <p className="text-xs font-semibold text-gray-600 mt-0.5 truncate">
-                        {provider.specialty}
-                      </p>
-
-                      <div className="flex items-center gap-2 mt-1.5 text-xs">
-                        {provider.reviewCount > 0 ? (
-                          <div className="flex items-center gap-1 font-bold text-amber-900 bg-amber-50 px-1.5 py-0.5 rounded">
-                            <Star size={12} className="fill-amber-400 text-amber-500" />
-                            <span>{provider.rating}</span>
-                            <span className="text-gray-400 font-normal">({provider.reviewCount})</span>
-                          </div>
-                        ) : (
-                          <span className="text-[11px] font-semibold text-gray-500 bg-gray-100 px-2 py-0.5 rounded">
-                            New Provider
-                          </span>
-                        )}
-
-                        <span className="text-gray-300">•</span>
-                        <span className="text-gray-600 text-xs font-medium">{provider.completedJobsCount} jobs</span>
-                        <span className="text-gray-300">•</span>
-                        <span className="text-gray-500 text-xs">{provider.location.area}</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Subcategories tags */}
-                  <div className="flex flex-wrap gap-1.5 pt-2 border-t border-gray-100">
-                    {provider.subcategories.slice(0, 3).map((sub, i) => (
-                      <span key={i} className="text-[11px] font-medium px-2 py-0.5 rounded-md bg-gray-100 text-gray-600">
-                        {sub}
-                      </span>
-                    ))}
-                  </div>
-
-                  {/* Pricing Guidance & Action */}
-                  <div className="flex items-center justify-between pt-2 border-t border-gray-100">
-                    <div>
-                      <span className="text-[10px] text-gray-400 uppercase font-semibold block">Starting from</span>
-                      <span className="text-sm font-extrabold text-[#151515]">
-                        PKR {provider.startingPrice.toLocaleString()}
-                      </span>
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setSelectedProviderForProfile(provider);
-                        }}
-                        className="text-xs font-bold text-gray-700 hover:text-black px-2.5 py-1.5 rounded-lg hover:bg-gray-100 transition-colors"
-                      >
-                        Profile
-                      </button>
-
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setIsPostRequestOpen(true);
-                        }}
-                        className="bg-[#B5F33D] hover:bg-[#a6e632] text-[#151515] font-extrabold text-xs px-3 py-1.5 rounded-lg shadow-sm flex items-center gap-1 active:scale-95 transition-all"
-                      >
-                        <span>Request Service</span>
-                        <ChevronRight size={14} />
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              ))
+          <button
+            onClick={() => setActiveMainTab('bids')}
+            className={`px-4 py-2 rounded-2xl text-xs font-extrabold transition-all flex items-center gap-1.5 relative ${
+              activeMainTab === 'bids'
+                ? 'bg-slate-950 text-white shadow-sm'
+                : 'text-slate-600 hover:bg-slate-100'
+            }`}
+          >
+            <span>My Requests & Bids</span>
+            {pendingOffersCount > 0 && (
+              <span className="text-[10px] bg-[#B5F33D] text-slate-950 px-1.5 py-0.2 rounded-full font-black">
+                {pendingOffersCount} offers
+              </span>
             )}
-          </div>
+          </button>
+
+          <button
+            onClick={() => setActiveMainTab('active_job')}
+            className={`px-4 py-2 rounded-2xl text-xs font-extrabold transition-all flex items-center gap-1.5 ${
+              activeMainTab === 'active_job'
+                ? 'bg-slate-950 text-white shadow-sm'
+                : 'text-slate-600 hover:bg-slate-100'
+            }`}
+          >
+            <span>Live Job & Start PIN</span>
+            {activeJobsCount > 0 && (
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+            )}
+          </button>
         </div>
 
-        {/* Right Side: Interactive Leaflet Map (Always visible on desktop; toggled on mobile) */}
-        <div className={`lg:col-span-7 flex flex-col ${viewMode === 'list' ? 'hidden lg:flex' : 'flex'}`}>
-          <div className="w-full h-full min-h-[480px]">
+        {/* Mobile View Toggle */}
+        {activeMainTab === 'providers' && (
+          <div className="flex sm:hidden bg-slate-100 p-0.5 rounded-xl text-xs font-bold">
+            <button
+              onClick={() => setViewMode('list')}
+              className={`p-1.5 rounded-lg ${viewMode === 'list' ? 'bg-white shadow text-black' : 'text-slate-500'}`}
+            >
+              <ListIcon size={14} />
+            </button>
+            <button
+              onClick={() => setViewMode('map')}
+              className={`p-1.5 rounded-lg ${viewMode === 'map' ? 'bg-white shadow text-black' : 'text-slate-500'}`}
+            >
+              <MapIcon size={14} />
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* TAB 1: PROVIDERS + INTERACTIVE MAP (Split 2-Column) */}
+      {activeMainTab === 'providers' && (
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 min-h-[520px]">
+          
+          {/* Left: Specialist Cards */}
+          <div className={`lg:col-span-5 flex flex-col gap-3.5 ${viewMode === 'map' ? 'hidden lg:flex' : 'flex'}`}>
+            <div className="space-y-3 overflow-y-auto max-h-[640px] pr-1">
+              {filteredProviders.length === 0 ? (
+                <div className="bg-white rounded-3xl p-8 border border-slate-200 text-center">
+                  <Wrench size={32} className="mx-auto text-slate-300 mb-2" />
+                  <h4 className="font-bold text-sm text-slate-800">No specialists match your criteria</h4>
+                  <p className="text-xs text-slate-500 mt-1">Try selecting another category or clearing search query.</p>
+                </div>
+              ) : (
+                filteredProviders.map(prov => (
+                  <div
+                    key={prov.id}
+                    onClick={() => setSelectedProviderForProfile(prov)}
+                    className="bg-white hover:border-slate-300 border border-slate-200/90 rounded-3xl p-4 shadow-xs hover:shadow transition-all cursor-pointer flex flex-col gap-3 group"
+                  >
+                    <div className="flex items-start gap-3.5">
+                      <div className="relative flex-shrink-0">
+                        <img
+                          src={prov.avatar}
+                          alt={prov.name}
+                          className="w-13 h-13 rounded-2xl object-cover border border-slate-200"
+                        />
+                        {prov.isOnline && (
+                          <span className="absolute -bottom-1 -right-1 w-3.5 h-3.5 bg-emerald-500 border-2 border-white rounded-full" />
+                        )}
+                      </div>
+
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between gap-1">
+                          <h3 className="font-extrabold text-sm text-slate-900 truncate group-hover:text-emerald-700 transition-colors">
+                            {prov.name}
+                          </h3>
+                          {prov.isVerified && (
+                            <span className="text-[10px] font-extrabold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200 flex items-center gap-1">
+                              <CheckCircle size={10} />
+                              Verified
+                            </span>
+                          )}
+                        </div>
+
+                        <p className="text-xs font-semibold text-slate-600 mt-0.5 truncate">{prov.specialty}</p>
+
+                        <div className="flex items-center gap-2 mt-1 text-xs">
+                          <span className="flex items-center gap-1 font-bold text-amber-950 bg-amber-50 px-1.5 py-0.2 rounded text-[11px]">
+                            <Star size={11} className="fill-amber-400 text-amber-500" />
+                            {prov.rating}
+                          </span>
+                          <span className="text-slate-300">•</span>
+                          <span className="text-slate-500 text-[11px]">{prov.completedJobsCount} jobs</span>
+                          <span className="text-slate-300">•</span>
+                          <span className="text-slate-500 text-[11px]">{prov.location.area}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Subcategories */}
+                    <div className="flex flex-wrap gap-1.5 pt-2 border-t border-slate-100">
+                      {prov.subcategories.slice(0, 3).map((sub, i) => (
+                        <span key={i} className="text-[10px] font-semibold px-2 py-0.5 rounded-lg bg-slate-100 text-slate-700">
+                          {sub}
+                        </span>
+                      ))}
+                    </div>
+
+                    {/* Pricing & Request Button */}
+                    <div className="flex items-center justify-between pt-2 border-t border-slate-100">
+                      <div>
+                        <span className="text-[9px] uppercase font-bold text-slate-400 block tracking-wider">Starting from</span>
+                        <span className="text-sm font-black text-slate-900">PKR {prov.startingPrice}</span>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedProviderForProfile(prov);
+                          }}
+                          className="px-3 py-1.5 rounded-xl border border-slate-200 text-xs font-bold text-slate-700 hover:bg-slate-50"
+                        >
+                          Profile
+                        </button>
+
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setIsPostRequestOpen(true);
+                          }}
+                          className="bg-[#B5F33D] hover:bg-[#a6e632] text-slate-950 font-black text-xs px-3.5 py-1.5 rounded-xl shadow-xs flex items-center gap-1 active:scale-95 transition-all"
+                        >
+                          <span>Request</span>
+                          <ChevronRight size={13} />
+                        </button>
+                      </div>
+                    </div>
+
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+          {/* Right: Interactive ServiceMap */}
+          <div className={`lg:col-span-7 flex flex-col ${viewMode === 'list' ? 'hidden lg:flex' : 'flex'}`}>
             <ServiceMap
               providers={filteredProviders}
               onSelectProvider={(prov) => setSelectedProviderForProfile(prov)}
               height="100%"
             />
           </div>
-        </div>
 
-      </div>
+        </div>
+      )}
+
+      {/* TAB 2: MY REQUESTS & LIVE BIDS (Shows the 3 competing offers) */}
+      {activeMainTab === 'bids' && (
+        <CustomerRequestsView />
+      )}
+
+      {/* TAB 3: ACTIVE JOB TRACKER & START PIN */}
+      {activeMainTab === 'active_job' && (
+        <CustomerJobTracker />
+      )}
 
     </div>
   );
