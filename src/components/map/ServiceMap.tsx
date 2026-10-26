@@ -1,8 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
-import L from 'leaflet';
+import { Map, Marker, NavigationControl, Popup } from 'maplibre-gl';
+import 'maplibre-gl/dist/maplibre-gl.css';
 import { useApp } from '../../context/AppContext';
 import { ProviderProfile } from '../../types';
-import { MapPin, Navigation2, RefreshCw, ZoomIn, ZoomOut } from 'lucide-react';
+import { Navigation2, Layers, Compass } from 'lucide-react';
 
 interface ServiceMapProps {
   providers: ProviderProfile[];
@@ -10,183 +11,256 @@ interface ServiceMapProps {
   height?: string;
 }
 
+// OpenFreeMap vector tile style endpoints
+const OPENFREEMAP_STYLES = {
+  positron: 'https://tiles.openfreemap.org/styles/positron', // Clean, minimalist inDrive aesthetic
+  liberty: 'https://tiles.openfreemap.org/styles/liberty',   // Full street detail & landmarks
+  bright: 'https://tiles.openfreemap.org/styles/bright',     // High-contrast
+};
+
 export const ServiceMap: React.FC<ServiceMapProps> = ({
   providers,
   onSelectProvider,
   height = "100%"
 }) => {
   const mapContainerRef = useRef<HTMLDivElement>(null);
-  const mapInstanceRef = useRef<L.Map | null>(null);
-  const markersLayerRef = useRef<L.LayerGroup | null>(null);
+  const mapInstanceRef = useRef<Map | null>(null);
+  const markersRef = useRef<Marker[]>([]);
   const { userLocation } = useApp();
-  const [mapReady, setMapReady] = useState(false);
 
+  const [currentStyle, setCurrentStyle] = useState<keyof typeof OPENFREEMAP_STYLES>('positron');
+  const [styleMenuOpen, setStyleMenuOpen] = useState(false);
+  const [mapLoaded, setMapLoaded] = useState(false);
+
+  // Initialize MapLibre GL map with OpenFreeMap vector tiles
   useEffect(() => {
     if (!mapContainerRef.current) return;
 
-    try {
-      // Clean up previous map if container was already initialized
-      if (mapInstanceRef.current) {
-        mapInstanceRef.current.remove();
-        mapInstanceRef.current = null;
-      }
+    // Center coordinates for MapLibre: [longitude, latitude]
+    const map = new Map({
+      container: mapContainerRef.current,
+      style: OPENFREEMAP_STYLES[currentStyle],
+      center: [userLocation.lng, userLocation.lat],
+      zoom: 13,
+      pitch: 30, // Subtle 3D angle for modern feel
+      attributionControl: false
+    });
 
-      if ((mapContainerRef.current as any)._leaflet_id) {
-        delete (mapContainerRef.current as any)._leaflet_id;
-      }
+    // Add navigation controls (zoom, pitch, rotation)
+    map.addControl(new NavigationControl({ showCompass: true, showZoom: true }), 'top-right');
 
-      const map = L.map(mapContainerRef.current, {
-        center: [userLocation.lat, userLocation.lng],
-        zoom: 13,
-        zoomControl: false,
-        attributionControl: false
-      });
+    map.on('load', () => {
+      setMapLoaded(true);
 
-      // CartoDB Positron clean map tiles (minimalist inDrive style)
-      L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
-        maxZoom: 19,
-        subdomains: 'abcd',
-      }).addTo(map);
+      // Add Coverage Radius GeoJSON polygon around user location
+      try {
+        const radiusInKm = 3.5;
+        const points = 64;
+        const coords: [number, number][] = [];
+        const distanceX = radiusInKm / (111.32 * Math.cos((userLocation.lat * Math.PI) / 180));
+        const distanceY = radiusInKm / 110.574;
 
-      const markersGroup = L.layerGroup().addTo(map);
-      markersLayerRef.current = markersGroup;
-      mapInstanceRef.current = map;
-
-      // 1. User Location Pin
-      const userIcon = L.divIcon({
-        className: 'custom-user-pin',
-        html: `
-          <div style="position:relative;display:flex;align-items:center;justify-content:center;width:32px;height:32px;">
-            <div style="position:absolute;width:32px;height:32px;border-radius:50%;background:#B5F33D;opacity:0.4;animation:pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;"></div>
-            <div style="width:20px;height:20px;border-radius:50%;background:#151515;border:2.5px solid #B5F33D;display:flex;align-items:center;justify-content:center;color:white;font-size:10px;font-weight:bold;box-shadow:0 2px 6px rgba(0,0,0,0.3);">
-              📍
-            </div>
-          </div>
-        `,
-        iconSize: [32, 32],
-        iconAnchor: [16, 16]
-      });
-
-      const userMarker = L.marker([userLocation.lat, userLocation.lng], { icon: userIcon });
-      userMarker.bindTooltip(`<b>Your Location</b><br/>${userLocation.area}`, { direction: 'top', offset: [0, -10] });
-      markersGroup.addLayer(userMarker);
-
-      // 2. Coverage Circle (subtle inDrive lime tint)
-      const circle = L.circle([userLocation.lat, userLocation.lng], {
-        color: '#84CC16',
-        fillColor: '#B5F33D',
-        fillOpacity: 0.1,
-        weight: 1.5,
-        radius: 3500
-      });
-      markersGroup.addLayer(circle);
-
-      // 3. Provider Markers
-      providers.forEach(prov => {
-        const isOnline = prov.isOnline;
-        const icon = L.divIcon({
-          className: 'custom-prov-pin',
-          html: `
-            <div style="cursor:pointer;display:flex;flex-direction:column;align-items:center;">
-              <div style="background:#ffffff;border:1.5px solid ${isOnline ? '#65A30D' : '#9CA3AF'};border-radius:9999px;padding:3px 8px;box-shadow:0 4px 12px rgba(0,0,0,0.12);display:flex;align-items:center;gap:4px;white-space:nowrap;font-size:11px;font-weight:800;color:#151515;">
-                <span style="width:6px;height:6px;border-radius:50%;background:${isOnline ? '#22C55E' : '#9CA3AF'};display:inline-block;"></span>
-                <span>₨ ${prov.startingPrice}</span>
-              </div>
-              <div style="width:8px;height:8px;background:#ffffff;border-right:1.5px solid ${isOnline ? '#65A30D' : '#9CA3AF'};border-bottom:1.5px solid ${isOnline ? '#65A30D' : '#9CA3AF'};transform:rotate(45deg);margin-top:-4px;"></div>
-            </div>
-          `,
-          iconSize: [75, 36],
-          iconAnchor: [37, 32]
-        });
-
-        const marker = L.marker([prov.location.lat, prov.location.lng], { icon });
-        marker.on('click', () => {
-          if (onSelectProvider) onSelectProvider(prov);
-        });
-
-        marker.bindTooltip(`
-          <div style="font-size:12px;padding:2px 4px;">
-            <b>${prov.name}</b><br/>
-            <span style="color:#059669;font-weight:600;">${prov.specialty}</span><br/>
-            ⭐ ${prov.rating} (${prov.reviewCount} reviews)
-          </div>
-        `, { offset: [0, -18] });
-
-        markersGroup.addLayer(marker);
-      });
-
-      // Force recalculate map size after layout stabilizes
-      setTimeout(() => {
-        if (mapInstanceRef.current) {
-          mapInstanceRef.current.invalidateSize();
-          setMapReady(true);
+        for (let i = 0; i < points; i++) {
+          const theta = (i / points) * (2 * Math.PI);
+          const x = distanceX * Math.cos(theta);
+          const y = distanceY * Math.sin(theta);
+          coords.push([userLocation.lng + x, userLocation.lat + y]);
         }
-      }, 250);
+        coords.push(coords[0]);
 
-    } catch (err) {
-      console.warn("Leaflet map initialization warning:", err);
-    }
+        map.addSource('coverage-area', {
+          type: 'geojson',
+          data: {
+            type: 'Feature',
+            geometry: {
+              type: 'Polygon',
+              coordinates: [coords]
+            },
+            properties: {}
+          }
+        });
+
+        map.addLayer({
+          id: 'coverage-area-fill',
+          type: 'fill',
+          source: 'coverage-area',
+          paint: {
+            'fill-color': '#B5F33D',
+            'fill-opacity': 0.12
+          }
+        });
+
+        map.addLayer({
+          id: 'coverage-area-line',
+          type: 'line',
+          source: 'coverage-area',
+          paint: {
+            'line-color': '#65A30D',
+            'line-width': 1.5,
+            'line-dasharray': [2, 2]
+          }
+        });
+      } catch (e) {
+        console.warn('GeoJSON circle layer warning:', e);
+      }
+    });
+
+    mapInstanceRef.current = map;
 
     return () => {
-      if (mapInstanceRef.current) {
-        try {
-          mapInstanceRef.current.remove();
-        } catch (e) {}
-        mapInstanceRef.current = null;
-      }
+      map.remove();
+      mapInstanceRef.current = null;
     };
-  }, [providers, userLocation, onSelectProvider]);
+  }, [currentStyle]);
 
-  const handleZoomIn = () => {
-    mapInstanceRef.current?.zoomIn();
-  };
+  // Update markers when providers or userLocation change
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map) return;
 
-  const handleZoomOut = () => {
-    mapInstanceRef.current?.zoomOut();
-  };
+    // Clear old markers
+    markersRef.current.forEach(m => m.remove());
+    markersRef.current = [];
 
+    // 1. User Location Marker
+    const userEl = document.createElement('div');
+    userEl.className = 'custom-user-marker';
+    userEl.innerHTML = `
+      <div style="position:relative;display:flex;align-items:center;justify-content:center;width:36px;height:36px;cursor:pointer;">
+        <div style="position:absolute;width:36px;height:36px;border-radius:50%;background:#B5F33D;opacity:0.4;animation:ping 2s cubic-bezier(0, 0, 0.2, 1) infinite;"></div>
+        <div style="width:22px;height:22px;border-radius:50%;background:#0F172A;border:2.5px solid #B5F33D;display:flex;align-items:center;justify-content:center;color:white;font-size:11px;font-weight:900;box-shadow:0 4px 10px rgba(0,0,0,0.3);">
+          📍
+        </div>
+      </div>
+    `;
+
+    const userMarker = new Marker({ element: userEl })
+      .setLngLat([userLocation.lng, userLocation.lat])
+      .setPopup(
+        new Popup({ offset: 15, closeButton: false }).setHTML(`
+          <div style="font-family:sans-serif;font-size:11px;font-weight:700;padding:2px 4px;color:#0f172a;">
+            Your Location: ${userLocation.area}
+          </div>
+        `)
+      )
+      .addTo(map);
+
+    markersRef.current.push(userMarker);
+
+    // 2. Providers Markers
+    providers.forEach(prov => {
+      const isOnline = prov.isOnline;
+      const el = document.createElement('div');
+      el.className = 'custom-provider-marker';
+      el.style.cursor = 'pointer';
+      el.innerHTML = `
+        <div style="display:flex;flex-direction:column;align-items:center;transition:transform 0.2s ease;">
+          <div style="background:#ffffff;border:1.5px solid ${isOnline ? '#65A30D' : '#94A3B8'};border-radius:9999px;padding:3px 9px;box-shadow:0 4px 12px rgba(15,23,42,0.15);display:flex;align-items:center;gap:5px;white-space:nowrap;font-size:11px;font-weight:900;color:#0F172A;">
+            <span style="width:6px;height:6px;border-radius:50%;background:${isOnline ? '#22C55E' : '#94A3B8'};display:inline-block;"></span>
+            <span>₨ ${prov.startingPrice}</span>
+          </div>
+          <div style="width:8px;height:8px;background:#ffffff;border-right:1.5px solid ${isOnline ? '#65A30D' : '#94A3B8'};border-bottom:1.5px solid ${isOnline ? '#65A30D' : '#94A3B8'};transform:rotate(45deg);margin-top:-4px;"></div>
+        </div>
+      `;
+
+      el.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (onSelectProvider) onSelectProvider(prov);
+      });
+
+      const popup = new Popup({ offset: 20, closeButton: false }).setHTML(`
+        <div style="font-family:sans-serif;font-size:11px;padding:4px;color:#0f172a;">
+          <div style="font-weight:800;font-size:12px;">${prov.name}</div>
+          <div style="color:#059669;font-weight:700;">${prov.specialty}</div>
+          <div style="color:#64748b;margin-top:2px;">★ ${prov.rating} (${prov.reviewCount} reviews) • ${prov.location.area}</div>
+        </div>
+      `);
+
+      const marker = new Marker({ element: el })
+        .setLngLat([prov.location.lng, prov.location.lat])
+        .setPopup(popup)
+        .addTo(map);
+
+      markersRef.current.push(marker);
+    });
+
+  }, [providers, userLocation, onSelectProvider, mapLoaded]);
+
+  // Recenter helper
   const handleRecenter = () => {
-    if (mapInstanceRef.current) {
-      mapInstanceRef.current.setView([userLocation.lat, userLocation.lng], 13, { animate: true });
-    }
+    mapInstanceRef.current?.flyTo({
+      center: [userLocation.lng, userLocation.lat],
+      zoom: 13,
+      essential: true
+    });
   };
 
   return (
-    <div className="relative w-full h-full min-h-[460px] bg-slate-100 rounded-3xl overflow-hidden border border-slate-200/80 shadow-sm" style={{ height }}>
+    <div className="relative w-full h-full min-h-[480px] bg-slate-100 rounded-3xl overflow-hidden border border-slate-200/90 shadow-sm" style={{ height }}>
+      {/* MapLibre DOM Container */}
       <div ref={mapContainerRef} className="w-full h-full z-0" />
 
-      {/* Floating Map Controls */}
-      <div className="absolute top-4 right-4 z-[400] flex flex-col gap-2">
+      {/* Floating Controls in Top Left */}
+      <div className="absolute top-4 left-4 z-10 flex items-center gap-2">
+        
+        {/* Recenter button */}
         <button
           onClick={handleRecenter}
-          className="bg-white hover:bg-slate-50 text-slate-800 p-2.5 rounded-2xl shadow-md border border-slate-200 flex items-center justify-center active:scale-95 transition-all"
-          title="Recenter on my location"
+          className="bg-white/95 backdrop-blur-md hover:bg-white text-slate-800 px-3 py-2 rounded-2xl shadow-md border border-slate-200 flex items-center gap-1.5 text-xs font-bold active:scale-95 transition-all"
+          title="Recenter on current location"
         >
-          <Navigation2 size={16} className="text-emerald-600 fill-emerald-600" />
+          <Navigation2 size={13} className="text-lime-600 fill-lime-600" />
+          <span>Recenter</span>
         </button>
 
-        <div className="bg-white rounded-2xl shadow-md border border-slate-200 overflow-hidden flex flex-col">
+        {/* OpenFreeMap Style Switcher */}
+        <div className="relative">
           <button
-            onClick={handleZoomIn}
-            className="p-2.5 text-slate-700 hover:bg-slate-50 border-b border-slate-100 flex items-center justify-center active:bg-slate-100"
-            title="Zoom In"
+            onClick={() => setStyleMenuOpen(!styleMenuOpen)}
+            className="bg-white/95 backdrop-blur-md hover:bg-white text-slate-800 px-3 py-2 rounded-2xl shadow-md border border-slate-200 flex items-center gap-1.5 text-xs font-bold active:scale-95 transition-all"
+            title="Switch OpenFreeMap style"
           >
-            <ZoomIn size={16} />
+            <Layers size={13} className="text-slate-600" />
+            <span className="capitalize">{currentStyle}</span>
           </button>
-          <button
-            onClick={handleZoomOut}
-            className="p-2.5 text-slate-700 hover:bg-slate-50 flex items-center justify-center active:bg-slate-100"
-            title="Zoom Out"
-          >
-            <ZoomOut size={16} />
-          </button>
+
+          {styleMenuOpen && (
+            <div className="absolute left-0 mt-2 w-36 bg-white rounded-2xl shadow-xl border border-slate-200 py-1.5 z-20 animate-in fade-in slide-in-from-top-2">
+              <div className="px-3 py-1 text-[9px] font-bold text-slate-400 uppercase tracking-wider">
+                OpenFreeMap Style
+              </div>
+              {(['positron', 'liberty', 'bright'] as const).map(style => (
+                <button
+                  key={style}
+                  onClick={() => {
+                    setCurrentStyle(style);
+                    setStyleMenuOpen(false);
+                  }}
+                  className={`w-full text-left px-3 py-1.5 text-xs font-semibold hover:bg-slate-50 capitalize flex items-center justify-between ${
+                    currentStyle === style ? 'text-lime-700 font-bold bg-lime-50' : 'text-slate-700'
+                  }`}
+                >
+                  <span>{style}</span>
+                  {currentStyle === style && <span className="w-1.5 h-1.5 rounded-full bg-lime-600"></span>}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
+
       </div>
 
-      {/* Status pill in bottom left */}
-      <div className="absolute bottom-4 left-4 z-[400] bg-white/95 backdrop-blur-md px-3.5 py-2 rounded-2xl shadow-sm border border-slate-200 text-xs font-semibold text-slate-800 flex items-center gap-2 pointer-events-none">
-        <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
-        <span>{providers.filter(p => p.isOnline).length} Verified Specialists Live in {userLocation.area}</span>
+      {/* Attribution & Status Badge in Bottom */}
+      <div className="absolute bottom-3 left-4 z-10 bg-white/95 backdrop-blur-md px-3 py-1.5 rounded-2xl shadow-xs border border-slate-200 text-[11px] font-semibold text-slate-700 flex items-center gap-2 pointer-events-none">
+        <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+        <span>{providers.filter(p => p.isOnline).length} Verified Pros in {userLocation.area}</span>
+        <span className="text-slate-300">•</span>
+        <span className="text-[10px] text-slate-500">Map: <b>OpenFreeMap</b></span>
+      </div>
+
+      {/* Official OpenFreeMap & OSM Legal Attribution in Bottom Right */}
+      <div className="absolute bottom-2 right-2 z-10 text-[9px] text-slate-500 bg-white/80 backdrop-blur-xs px-2 py-0.5 rounded-md">
+        <a href="https://openfreemap.org" target="_blank" rel="noreferrer" className="hover:underline">OpenFreeMap</a> © <a href="https://www.openmaptiles.org/" target="_blank" rel="noreferrer" className="hover:underline">OpenMapTiles</a> Data: <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer" className="hover:underline">OSM</a>
       </div>
     </div>
   );
